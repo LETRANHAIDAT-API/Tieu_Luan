@@ -4,25 +4,34 @@
 
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <BlynkSimpleEsp32.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include <UniversalTelegramBot.h>
 
 char ssid[] = "Wokwi-GUEST"; 
 char pass[] = "";
 
-#define SS_PIN    5
-#define RST_PIN   22
-#define RELAY_PIN 15
-#define BUZZER_PIN 2
+#define BOT_TOKEN "8603859822:AAGZ0lCTspWXLyZJjS_-mqLcoWau48BxE_0"
+#define GROUP_ID "-5139517971"
+
+WiFiClientSecure secured_client;
+UniversalTelegramBot bot(BOT_TOKEN, secured_client);
+
+#define SS_PIN      5
+#define RST_PIN     22
+#define LED_GREEN   4  
+#define LED_RED     15
+#define BUZZER_PIN  2
 
 MFRC522 rfc522(SS_PIN, RST_PIN);
 BlynkTimer timer;
 
 String masterUID = "11 22 33 44"; 
 unsigned long lockOpenedMillis = 0;   
-const long lockInterval = 500;       
-bool isLocked = true;                 
+const long lockInterval = 2000;      
+bool isLocked = true;                
 
 void playBeep(int duration) {
   tone(BUZZER_PIN, 1000); 
@@ -30,15 +39,24 @@ void playBeep(int duration) {
   noTone(BUZZER_PIN);
 }
 
+void sendTelegramMessage(String message) {
+  Serial.println("Dang gui Telegram...");
+  bot.sendMessage(GROUP_ID, message, "");
+}
+
 void openDoor(String source) {
   Serial.println("Mo cua tu: " + source);
-  digitalWrite(RELAY_PIN, HIGH);
+  digitalWrite(LED_GREEN, HIGH); 
   isLocked = false;
   lockOpenedMillis = millis();
-  playBeep(500);
+  playBeep(500); 
+  digitalWrite(LED_GREEN, LOW); 
 
-  Blynk.virtualWrite(V1, "Open"); 
-  Serial.println("Trang thai: Open");
+  Blynk.virtualWrite(V1, "Cửa đã mở"); 
+  
+  String msg = "THÔNG BÁO*: Cửa đã được mở!\n";
+  msg += " Nguồn: " + source;
+  sendTelegramMessage(msg);
 }
 
 BLYNK_WRITE(V0) {
@@ -46,14 +64,10 @@ BLYNK_WRITE(V0) {
   if (value == 1) {
     if (isLocked) {
       openDoor("App Blynk");
-      Blynk.virtualWrite(V1, "Open"); 
     }
   } else {
-    
-    digitalWrite(RELAY_PIN, LOW);
     isLocked = true;
-    Blynk.virtualWrite(V1, "Close"); 
-    Serial.println("Cua dong tu App.");
+    Blynk.virtualWrite(V1, "Cửa đã đóng"); 
   }
 }
 
@@ -62,13 +76,17 @@ void setup() {
   SPI.begin();
   rfc522.PCD_Init();
   
-  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(LED_GREEN, OUTPUT);
+  pinMode(LED_RED, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW);
+  
+  digitalWrite(LED_GREEN, LOW);
+  digitalWrite(LED_RED, LOW);
   
   Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
-  
-  Serial.println("--- HE THONG SMART LOCK KET NOI BLYNK ---");
+  secured_client.setInsecure();
+
+  Serial.println("--- HE THONG SMART LOCK READY ---");
   Blynk.virtualWrite(V1, "He thong san sang!");
 }
 
@@ -76,17 +94,13 @@ void loop() {
   Blynk.run();
   timer.run();
 
- 
   unsigned long currentMillis = millis();
   if (!isLocked && (currentMillis - lockOpenedMillis >= lockInterval)) {
-    digitalWrite(RELAY_PIN, LOW);
     isLocked = true;
-    Serial.println("Cua da dong.");
-    Blynk.virtualWrite(V1, "Close");
+    Blynk.virtualWrite(V1, "Cửa đã đóng");
     Blynk.virtualWrite(V0, 0); 
   }
 
-  
   if (!rfc522.PICC_IsNewCardPresent() || !rfc522.PICC_ReadCardSerial()) {
     return;
   }
@@ -106,10 +120,17 @@ void loop() {
     openDoor("The RFID");
   } else {
     Serial.println("Canh bao: Sai the!");
-    Blynk.virtualWrite(V1, "CANH BAO: Sai the!");
+    
     for(int i=0; i<3; i++) {
+      digitalWrite(LED_RED, HIGH);
       playBeep(100);
+      digitalWrite(LED_RED, LOW);
       delay(100);
     }
+
+    Blynk.virtualWrite(V1, "CANH BAO: Sai the!");
+    String warnMsg = "*CẢNH BÁO NGUY HIỂM*\n";
+    warnMsg += "Phát hiện quẹt thẻ lạ!\n Mã: `" + scannedUID + "`";
+    sendTelegramMessage(warnMsg);
   }
 }
